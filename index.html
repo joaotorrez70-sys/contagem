@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1f4e78">
+<meta name="robots" content="noindex">
+<title>Recebimento de Cortes</title>
+<style>
+  :root { --azul:#1f4e78; --verde:#1e7b34; --verm:#c00000; --lar:#b35c00; --cinza:#666; --borda:#d9d9d9; --fundo:#f4f6f9; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background:var(--fundo); color:#222; font-size:16px; }
+  header { background:var(--azul); color:#fff; padding:14px 16px; font-size:19px; font-weight:600; position:sticky; top:0; z-index:5; }
+  header small { display:block; font-size:12px; font-weight:400; opacity:.85; }
+  main { max-width:720px; margin:0 auto; padding:12px 16px 120px; }
+  .card { background:#fff; border:1px solid var(--borda); border-radius:10px; padding:12px; margin:10px 0; }
+  label.campo { display:block; font-size:13px; color:var(--cinza); margin:8px 0 4px; }
+  input, select, textarea { width:100%; font-size:16px; padding:10px; border:1px solid #bbb; border-radius:8px; background:#fff; }
+  textarea { min-height:60px; }
+  h2 { font-size:16px; margin:4px 0 8px; color:var(--azul); }
+  .corte { display:flex; gap:10px; align-items:flex-start; padding:10px 4px; border-bottom:1px solid #eee; }
+  .corte:last-child { border-bottom:0; }
+  .corte input[type=checkbox] { width:22px; height:22px; margin-top:2px; flex:none; }
+  .corte .txt { flex:1; }
+  .tag { display:inline-block; font-size:12px; padding:2px 8px; border-radius:10px; margin:4px 4px 0 0; font-weight:600; }
+  .t-pend { background:#fff2cc; color:#7f6000; } .t-rec { background:#ffc7ce; color:#9c0006; } .t-cons { background:#e2efda; color:#375623; } .t-bloq { background:#eee; color:#555; }
+  .modo { display:flex; gap:8px; margin-top:8px; }
+  .modo button { flex:1; padding:9px; border-radius:8px; border:1px solid var(--azul); background:#fff; color:var(--azul); font-size:15px; }
+  .modo button.on { background:var(--azul); color:#fff; }
+  .cor { border-top:1px solid #eee; padding:10px 0; }
+  .cor:first-of-type { border-top:0; }
+  .cor .nome { font-weight:700; margin-bottom:6px; }
+  .linha2 { display:flex; gap:8px; align-items:center; }
+  .linha2 input { max-width:140px; }
+  .st { font-size:14px; font-weight:600; margin-top:6px; }
+  .ok { color:var(--verde); } .falta { color:var(--verm); } .sobra { color:var(--lar); } .pend { color:#7f6000; }
+  .ocor { background:#fafafa; border:1px dashed #ccc; border-radius:8px; padding:8px; margin-top:8px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:6px; }
+  .grid .full { grid-column: 1 / -1; }
+  button.add { margin-top:8px; padding:9px 12px; border-radius:8px; border:1px dashed var(--verm); background:#fff; color:var(--verm); font-size:15px; }
+  button.del { border:0; background:none; color:#999; font-size:13px; float:right; }
+  #barra { position:fixed; left:0; right:0; bottom:0; background:#fff; border-top:1px solid var(--borda); padding:10px 16px; }
+  #barra div { max-width:720px; margin:0 auto; }
+  #enviar { width:100%; padding:14px; font-size:17px; font-weight:700; border:0; border-radius:10px; background:var(--verde); color:#fff; }
+  #enviar:disabled { background:#9bbfa5; }
+  #erros { color:var(--verm); font-size:14px; margin-bottom:6px; white-space:pre-line; }
+  .aviso { font-size:13px; color:var(--cinza); }
+  .vazio { color:var(--cinza); padding:20px 0; text-align:center; }
+</style>
+</head>
+<body>
+<header>Recebimento de Cortes<small id="atual">carregando…</small></header>
+<main>
+  <div id="carregando" class="vazio">Carregando os cortes…</div>
+  <div id="tela" hidden>
+    <div class="card">
+      <label class="campo">Quem contou</label><input id="quem" placeholder="seu nome">
+      <label class="campo">Lote</label><select id="lote"></select>
+    </div>
+    <div id="cortes"></div>
+    <div id="contagem"></div>
+  </div>
+  <div id="fim" hidden class="card"></div>
+</main>
+<div id="barra" hidden><div><div id="erros"></div><button id="enviar">Enviar contagem</button></div></div>
+
+<script>
+var D = null, S = {}; // S[key] = {parcial:false, cores:{cor:{boas:'', just:'', linhas:[], mortas:'', motivo:'', desc:''}}}
+var $ = function (id) { return document.getElementById(id); };
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function num(v) { var n = Number(String(v).replace(',', '.')); return (String(v).trim() === '' || !isFinite(n)) ? null : n; }
+// Funciona nos 2 lugares: dentro do Google (google.script.run) e fora dele, no GitHub Pages (fetch na API).
+// Fora do Google não usa conta/cookie nenhum -> não importa quantas contas Google o celular tem.
+var API = 'https://script.google.com/macros/s/AKfycbz0kWOXVyOGu44gmzoTdVvpZSvXaNTEEePMwF-8jWaUQ8Iwy8jv6l-OeIO-B0bQQsHt0w/exec';
+function dentroDoGoogle() { return !!(window.google && google.script && google.script.run); }
+function chamar(fn, arg, seg) {
+  if (dentroDoGoogle()) return new Promise(function (ok, erro) { google.script.run.withSuccessHandler(ok).withFailureHandler(erro)[fn](arg); });
+  var ctrl = window.AbortController ? new AbortController() : null;
+  var tempo = ctrl ? setTimeout(function () { ctrl.abort(); }, (seg || 60) * 1000) : null;
+  var opc = fn === 'getDados'
+    ? { method: 'GET', cache: 'no-store', redirect: 'follow' }
+    : { method: 'POST', cache: 'no-store', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ acao: fn, p: arg }) };
+  if (ctrl) opc.signal = ctrl.signal;
+  var url = fn === 'getDados' ? API + '?api=dados&t=' + Date.now() : API;
+  var fim = function () { if (tempo) clearTimeout(tempo); };
+  return fetch(url, opc).then(function (r) {
+    if (!r.ok) throw new Error('o servidor respondeu ' + r.status + '. Tente de novo em 1 minuto.');
+    return r.text().then(function (t) {
+      var j; try { j = JSON.parse(t); } catch (e) { throw new Error('resposta estranha do servidor. Tente de novo em 1 minuto.'); }
+      if (!j.ok) throw new Error(j.erro || 'erro desconhecido');
+      return j.r;
+    });
+  }, function (e) {
+    if (e && e.name === 'AbortError') throw new Error('demorou demais pra responder. Confira a internet e tente de novo.');
+    throw new Error('sem conexão com a internet (ou o servidor não respondeu). Tente de novo.');
+  }).then(function (r) { fim(); return r; }, function (e) { fim(); throw e; });
+}
+function hoje() { var d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
+
+function carregar() {
+  $('carregando').hidden = false; $('tela').hidden = true; $('fim').hidden = true; $('barra').hidden = true;
+  $('carregando').textContent = 'Carregando os cortes…';
+  chamar('getDados', null, 120).then(iniciar).catch(function (e) {
+    $('carregando').innerHTML = 'Erro ao carregar: ' + esc((e && e.message) || e) + '<br><br><button id="tentar" class="add" style="border-style:solid;color:#1f4e78;border-color:#1f4e78">Tentar de novo</button>';
+    $('tentar').onclick = carregar;
+  });
+}
+function iniciar(d) {
+  D = d; S = {};
+  $('atual').textContent = 'dados do Excel de ' + (d.atualizado || '—');
+  $('carregando').hidden = true; $('tela').hidden = false; $('barra').hidden = false;
+  try { $('quem').value = localStorage.getItem('quem') || ''; } catch (e) {}
+  var lotes = Object.keys(d.lotes || {}).sort();
+  var sel = $('lote');
+  sel.innerHTML = '<option value="">' + (lotes.length ? 'escolha o lote' : 'nenhum lote esperando contagem') + '</option>' +
+    lotes.map(function (l) { return '<option>' + esc(l) + '</option>'; }).join('');
+  sel.onchange = function () { S = {}; desenhaCortes(); desenhaContagem(); };
+  desenhaCortes(); desenhaContagem();
+}
+function itensDoLote() { return (D.lotes[$('lote').value] || []); }
+function item(key) { return itensDoLote().filter(function (i) { return i.key === key; })[0]; }
+
+function desenhaCortes() {
+  var it = itensDoLote(), box = $('cortes');
+  if (!$('lote').value) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="card"><h2>Quais cortes chegaram?</h2>' + it.map(function (i) {
+    var tags = '';
+    if (i.modo === 'PENDENTE') tags += '<span class="tag t-pend">PENDENTE: faltam ' + i.faltam + ' da entrega parcial</span>';
+    if (i.modo === 'RECONTAR') tags += '<span class="tag t-rec">RECONTAR TUDO (deu diferença)</span>';
+    if (i.modo === 'CONSERTO') tags += '<span class="tag t-cons">VOLTA DE CONSERTO</span>';
+    if (i.bloqueado) tags += '<span class="tag t-bloq">' + esc(i.bloqueado) + '</span>';
+    var on = !!S[i.key];
+    var cheg = on ? '<div class="chegou"><label class="campo">Chegou em (data que o corte chegou)</label><input type="date" max="' + hoje() + '" data-dk="' + esc(i.key) + '" value="' + esc(S[i.key].data || '') + '"></div>' : '';
+    var modo = (on && i.parcialOk) ? '<div class="modo"><button type="button" data-k="' + esc(i.key) + '" data-p="0" class="' + (S[i.key].parcial ? '' : 'on') + '">Completo</button>' +
+      '<button type="button" data-k="' + esc(i.key) + '" data-p="1" class="' + (S[i.key].parcial ? 'on' : '') + '">Parcial (vem mais depois)</button></div>' : '';
+    return '<div class="corte"><input type="checkbox" data-k="' + esc(i.key) + '"' + (on ? ' checked' : '') + (i.bloqueado ? ' disabled' : '') + '>' +
+      '<div class="txt"><b>' + esc(i.corte) + '</b> · ' + esc(i.etapa) + '<br><span class="aviso">' + esc(i.forn) + ' · ' + esc(i.modelo) + '</span><br>' + tags + cheg + modo + '</div></div>';
+  }).join('') + '</div>';
+  box.querySelectorAll('input[type=checkbox]').forEach(function (cb) {
+    cb.onchange = function () {
+      var k = cb.getAttribute('data-k');
+      $('erros').textContent = '';
+      if (cb.checked) S[k] = { parcial: false, data: '', cores: {} }; else delete S[k];
+      desenhaCortes(); desenhaContagem();
+    };
+  });
+  box.querySelectorAll('[data-dk]').forEach(function (el) {
+    el.oninput = el.onchange = function () { $('erros').textContent = ''; S[el.getAttribute('data-dk')].data = el.value; };
+  });
+  box.querySelectorAll('.modo button').forEach(function (b) {
+    b.onclick = function () { S[b.getAttribute('data-k')].parcial = b.getAttribute('data-p') === '1'; desenhaCortes(); desenhaContagem(); };
+  });
+}
+
+function estCor(key, cor) {
+  var s = S[key].cores[cor]; if (!s) s = S[key].cores[cor] = { boas: '', just: '', linhas: [], mortas: '', motivo: '', culpa: '', desc: '' }; return s;
+}
+var desenhando = false;
+function desenhaContagem() {
+  if (desenhando) return;
+  desenhando = true;
+  try { desenhaContagem_(); } finally { desenhando = false; }
+}
+function desenhaContagem_() {
+  var box = $('contagem'); var html = '';
+  itensDoLote().forEach(function (i) {
+    if (!S[i.key]) return;
+    html += '<div class="card"><h2>' + esc(i.corte) + ' · ' + esc(i.etapa) + (S[i.key].parcial ? ' · PARCIAL' : '') + '</h2>';
+    if (i.modo === 'RECONTAR') html += '<div class="aviso">Conte TUDO de novo. Essa contagem substitui a anterior.</div>';
+    if (i.modo === 'PENDENTE') html += '<div class="aviso">Conte só o que chegou agora (o resto da entrega parcial).</div>';
+    i.cores.forEach(function (c) {
+      var s = estCor(i.key, c.cor), id = esc(i.key + '|' + c.cor);
+      html += '<div class="cor" data-id="' + id + '"><div class="nome">' + esc(c.cor) + '</div>';
+      if (i.modo === 'CONSERTO') {
+        html += '<div class="aviso">esperando conserto: ' + c.alvo + '</div><div class="grid">' +
+          '<div><label class="campo">Voltaram boas</label><input inputmode="numeric" data-f="boas" value="' + esc(s.boas) + '"></div>' +
+          '<div><label class="campo">Morreram</label><input inputmode="numeric" data-f="mortas" value="' + esc(s.mortas) + '"></div>' +
+          (num(s.mortas) > 0 ? '<div class="full"><label class="campo">Motivo das que morreram</label><select data-f="motivo">' + optsMot('MORTA', s.motivo, i.etapa) + '</select></div>' +
+          culpaHtml('MORTA', s.motivo, s.culpa, 'data-f="culpa"') +
+          '<div class="full"><label class="campo">Descrição (obrigatória)</label><input data-f="desc" value="' + esc(s.desc) + '" placeholder="o que aconteceu?"></div>' : '') + '</div>';
+      } else {
+        html += '<div class="linha2"><label class="campo" style="margin:0">BOAS</label><input inputmode="numeric" data-f="boas" value="' + esc(s.boas) + '" placeholder="contar"></div>';
+        html += '<div class="ocors">' + s.linhas.map(function (l, n) { return linhaHtml(l, n, i.etapa); }).join('') + '</div>';
+        html += '<button type="button" class="add" data-add="1" hidden>+ defeito / morta</button>';
+        html += '<div class="just" hidden><label class="campo">Sobrou peça: explique (de onde veio?)</label><textarea data-f="just">' + esc(s.just) + '</textarea></div>';
+      }
+      html += '<div class="st"></div></div>';
+    });
+    html += '</div>';
+  });
+  box.innerHTML = html;
+  box.querySelectorAll('.cor').forEach(function (div) {
+    var p = div.getAttribute('data-id').split('|'); var cor = p.pop(); var key = p.join('|');
+    var s = estCor(key, cor);
+    div.querySelectorAll('[data-f]').forEach(function (el) {
+      var f = el.getAttribute('data-f');
+      el.oninput = function () { $('erros').textContent = ''; s[f] = el.value; avalia(div, key, cor); };
+      el.onchange = function () {
+        s[f] = el.value;
+        if (f === 'motivo') { s.culpa = culpaPad('MORTA', s.motivo); desenhaContagem(); return; }
+        if (f === 'mortas' && item(key).modo === 'CONSERTO' && (num(s.mortas) > 0) !== !!div.querySelector('[data-f="motivo"]')) { desenhaContagem(); return; }
+        avalia(div, key, cor);
+      };
+    });
+    div.querySelectorAll('[data-lf]').forEach(function (el) {
+      el.oninput = el.onchange = function (ev) {
+        $('erros').textContent = '';
+        var l = s.linhas[Number(el.getAttribute('data-n'))], f = el.getAttribute('data-lf');
+        l[f] = el.value;
+        if (f === 'tipo') { l.motivo = ''; l.culpa = ''; desenhaContagem(); return; }
+        if (f === 'motivo' && ev.type === 'change') { l.culpa = culpaPad(l.tipo, l.motivo); desenhaContagem(); return; }
+        avalia(div, key, cor);
+      };
+    });
+    div.querySelectorAll('[data-del]').forEach(function (b) { b.onclick = function () { s.linhas.splice(Number(b.getAttribute('data-del')), 1); desenhaContagem(); }; });
+    var add = div.querySelector('[data-add]');
+    if (add) add.onclick = function () { s.linhas.push({ tipo: 'DEFEITO', motivo: '', qtd: '', culpa: '', desc: '' }); desenhaContagem(); };
+    avalia(div, key, cor);
+  });
+}
+function grupoDe(tipo, motivo) { var g = ((D.mot || {})[tipo] || []).filter(function (x) { return x.m.indexOf(motivo) >= 0; })[0]; return g ? g.g : ''; }
+function culpaPad(tipo, motivo) { var g = grupoDe(tipo, motivo); return g.indexOf('Não é da oficina') === 0 ? 'NÃO' : (g.indexOf('Da oficina') === 0 ? 'SIM' : ''); }
+function etapaOk(g, etapa) { if (!g.e) return true; var e = String(etapa || ''); return g.e === 'C' ? e.indexOf('COSTURA') >= 0 : e.indexOf('ACABAMENTO') >= 0; }
+function optsMot(tipo, v, etapa) {
+  return '<option value="">escolha</option>' + ((D.mot || {})[tipo] || []).filter(function (g) { return etapaOk(g, etapa); }).map(function (g) {
+    return '<optgroup label="' + esc(g.g) + '">' + g.m.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</optgroup>';
+  }).join('');
+}
+function culpaHtml(tipo, motivo, culpa, attr) {
+  var g = grupoDe(tipo, motivo);
+  if (!motivo) return '';
+  if (g.indexOf('Não é da oficina') === 0) return '<div class="full aviso">Culpa: <b>não é da oficina</b> → não desconta</div>';
+  var txt = tipo === 'DEFEITO' ? ' (defeito volta pra oficina arrumar, não desconta)' : ' (SIM = desconta da oficina)';
+  return '<div class="full"><label class="campo">Culpa da oficina?' + txt + '</label><select ' + attr + '>' + opts(['SIM', 'NÃO'], culpa) + '</select></div>';
+}
+function opts(lista, v) { return '<option value="">escolha</option>' + lista.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join(''); }
+function linhaHtml(l, n, etapa) {
+  return '<div class="ocor"><button type="button" class="del" data-del="' + n + '">remover</button><div class="grid">' +
+    '<div><label class="campo">Tipo</label><select data-lf="tipo" data-n="' + n + '"><option' + (l.tipo === 'DEFEITO' ? ' selected' : '') + ' value="DEFEITO">Com defeito</option><option' + (l.tipo === 'MORTA' ? ' selected' : '') + ' value="MORTA">Morta / faltando</option></select></div>' +
+    '<div><label class="campo">Quantas</label><input inputmode="numeric" data-lf="qtd" data-n="' + n + '" value="' + esc(l.qtd) + '"></div>' +
+    '<div class="full aviso">' + (l.tipo === 'MORTA' ? 'Morta = não tem conserto.' : 'Com defeito = volta pra oficina arrumar.') + '</div>' +
+    '<div class="full"><label class="campo">Motivo</label><select data-lf="motivo" data-n="' + n + '">' + optsMot(l.tipo, l.motivo, etapa) + '</select></div>' +
+    culpaHtml(l.tipo, l.motivo, l.culpa, 'data-lf="culpa" data-n="' + n + '"') +
+    '<div class="full"><label class="campo">Descrição (obrigatória)</label><input data-lf="desc" data-n="' + n + '" value="' + esc(l.desc) + '" placeholder="o que aconteceu? onde na peça?"></div></div></div>';
+}
+function contaCor(key, cor) {
+  var i = item(key), c = i.cores.filter(function (x) { return x.cor === cor; })[0], s = estCor(key, cor);
+  if (i.modo === 'CONSERTO') { var t = (num(s.boas) || 0) + (num(s.mortas) || 0); return { modo: 'CONSERTO', resto: c.alvo - t, alvo: c.alvo, s: s }; }
+  var b = num(s.boas), soma = (b || 0) + s.linhas.reduce(function (a, l) { return a + (num(l.qtd) || 0); }, 0);
+  return { modo: i.modo, boasVazio: b === null, resto: c.alvo - soma, alvo: c.alvo, s: s, parcial: S[key].parcial };
+}
+function avalia(div, key, cor) {
+  var r = contaCor(key, cor), st = div.querySelector('.st'), add = div.querySelector('[data-add]'), just = div.querySelector('.just');
+  if (r.modo === 'CONSERTO') {
+    st.className = 'st ' + (r.resto < 0 ? 'sobra' : 'ok');
+    st.textContent = r.resto < 0 ? 'passou do que estava no conserto (' + r.alvo + ')' : ((num(r.s.boas) || num(r.s.mortas)) ? (r.resto > 0 ? r.resto + ' continuam no conserto' : '✔ voltou tudo') : '');
+    return;
+  }
+  if (r.boasVazio && !r.s.linhas.length) { st.textContent = ''; if (add) add.hidden = true; if (just) just.hidden = true; return; }
+  if (r.resto === 0) { st.className = 'st ok'; st.textContent = '✔ fechou'; if (add) add.hidden = true; if (just) just.hidden = true; }
+  else if (r.resto > 0) {
+    if (r.parcial) { st.className = 'st pend'; st.textContent = r.resto + ' ficam PENDENTES pra próxima entrega'; }
+    else { st.className = 'st falta'; st.textContent = 'faltam ' + r.resto + ' pra fechar: diga o que aconteceu com elas'; }
+    if (add) add.hidden = false; if (just) just.hidden = true;
+  } else { st.className = 'st sobra'; st.textContent = 'sobram ' + (-r.resto) + ': confira a contagem'; if (add) add.hidden = true; if (just) just.hidden = false; }
+}
+
+$('enviar').onclick = function () {
+  var erros = [];
+  var quem = $('quem').value.trim();
+  if (!quem) erros.push('Falta quem contou.');
+  var keys = Object.keys(S);
+  if (!keys.length) erros.push('Marque pelo menos um corte.');
+  var itens = keys.map(function (k) {
+    var i = item(k), cores = [];
+    if (!S[k].data) erros.push(i.corte + ': falta a data em que o corte chegou.');
+    else if (S[k].data > hoje()) erros.push(i.corte + ': a data de chegada está no futuro.');
+    i.cores.forEach(function (c) {
+      var r = contaCor(k, c.cor), s = r.s, nm = i.corte + ' ' + c.cor + ': ';
+      if (i.modo === 'CONSERTO') {
+        if (r.resto < 0) erros.push(nm + 'passou do que estava no conserto.');
+        if ((num(s.mortas) || 0) > 0) {
+          if (!s.motivo) erros.push(nm + 'falta o motivo das que morreram.');
+          else if (!s.culpa) erros.push(nm + 'diga se é culpa da oficina.');
+          if (!String(s.desc || '').trim()) erros.push(nm + 'falta a descrição das que morreram.');
+        }
+        cores.push({ cor: c.cor, boas: s.boas, mortas: s.mortas, motivo: s.motivo, culpa: s.culpa, desc: s.desc });
+        return;
+      }
+      if (r.boasVazio && !s.linhas.length) { if (!S[k].parcial) erros.push(nm + 'falta contar as BOAS (se não veio nenhuma, digite 0).'); return; }
+      if (r.resto > 0 && !S[k].parcial) erros.push(nm + 'faltam ' + r.resto + ' pra fechar.');
+      if (r.resto < 0 && !String(s.just).trim()) erros.push(nm + 'sobraram ' + (-r.resto) + ': explique.');
+      s.linhas.forEach(function (l) {
+        if (!(num(l.qtd) > 0)) erros.push(nm + 'linha de defeito/morta sem quantidade.');
+        if (!l.motivo) erros.push(nm + 'linha de defeito/morta sem motivo.');
+        else if (!l.culpa) erros.push(nm + 'diga se é culpa da oficina.');
+        if (!String(l.desc || '').trim()) erros.push(nm + 'linha de defeito/morta sem descrição.');
+      });
+      cores.push({ cor: c.cor, boas: s.boas, just: r.resto < 0 ? s.just : '', linhas: s.linhas });
+    });
+    return { key: k, full: i.full, etapa: i.modo === 'CONSERTO' ? i.etapa : i.etapa, modo: i.modo, parcial: !!S[k].parcial, data: S[k].data, snap: i.snap, cores: cores };
+  });
+  $('erros').textContent = erros.slice(0, 8).join('\n') + (erros.length > 8 ? '\n…' : '');
+  if (erros.length) return;
+  try { localStorage.setItem('quem', quem); } catch (e) {}
+  var pacote = { quem: quem, itens: itens };
+  var assin = JSON.stringify(pacote);
+  // mesma contagem reenviada (ex.: internet caiu) usa o mesmo código -> o servidor não grava 2 vezes
+  if (!ultEnvio || ultEnvio.assin !== assin) ultEnvio = { assin: assin, id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10) };
+  pacote.envio = ultEnvio.id;
+  $('enviar').disabled = true; $('enviar').textContent = 'Enviando…';
+  chamar('salvar', pacote, 90).then(function (n) {
+    ultEnvio = null;
+    $('enviar').disabled = false; $('enviar').textContent = 'Enviar contagem';
+    $('tela').hidden = true; $('barra').hidden = true; $('fim').hidden = false;
+    $('fim').innerHTML = '<h2>✔ Contagem enviada</h2><p>' + itens.length + ' corte(s), ' + n + ' linha(s). Obrigado!</p><button id="nova" class="add" style="border-style:solid;color:#1f4e78;border-color:#1f4e78">Nova contagem</button>';
+    $('nova').onclick = carregar;
+  }, function (e) {
+    $('enviar').disabled = false; $('enviar').textContent = 'Enviar contagem'; $('erros').textContent = 'Não enviou: ' + ((e && e.message) || e);
+  });
+};
+var ultEnvio = null;
+carregar();
+</script>
+</body>
+</html>
